@@ -1,0 +1,46 @@
+## Build artifacts
+bin/
+obj/
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Rider
+.idea/
+
+## Visual Studio Code
+.vscode/
+
+## User-specific files
+*.user
+*.userosscache
+*.suo
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+## Node modules (if any frontend tooling is used)
+node_modules/
+
+## Environment and secrets
+appsettings.Development.json
+*.env
