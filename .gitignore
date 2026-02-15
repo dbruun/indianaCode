@@ -44,3 +44,6 @@ node_modules/
 ## Environment and secrets
 appsettings.Development.json
 *.env
+
+## wwwroot/lib - 3rd party libraries managed by tools
+**/wwwroot/lib/
