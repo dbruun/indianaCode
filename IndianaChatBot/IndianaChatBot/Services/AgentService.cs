@@ -12,8 +12,10 @@ public class AgentService : IAgentService
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<AgentService> _logger;
+    private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private PersistentAgentsClient? _agentClient;
     private string? _agentId;
+    private int _pollingIntervalMs;
 
     public AgentService(
         IConfiguration configuration,
@@ -21,6 +23,7 @@ public class AgentService : IAgentService
     {
         _configuration = configuration;
         _logger = logger;
+        _pollingIntervalMs = _configuration.GetValue<int>("FoundryAgent:PollingIntervalMs", 500);
     }
 
     public async Task<ChatResponse> GetResponseAsync(string message)
@@ -39,8 +42,8 @@ public class AgentService : IAgentService
             }
 
             // Get the agent
-            var agentResponse = await _agentClient.Administration.GetAgentAsync(_agentId);
-            var agent = agentResponse.Value;
+            var getAgentResponse = await _agentClient.Administration.GetAgentAsync(_agentId);
+            var agent = getAgentResponse.Value;
 
             // Create a new thread for this conversation
             var threadResponse = await _agentClient.Threads.CreateThreadAsync();
@@ -60,7 +63,7 @@ public class AgentService : IAgentService
             // Poll for completion
             while (run.Status == RunStatus.Queued || run.Status == RunStatus.InProgress)
             {
-                await Task.Delay(500);
+                await Task.Delay(_pollingIntervalMs);
                 var updatedRunResponse = await _agentClient.Runs.GetRunAsync(thread.Id, run.Id);
                 run = updatedRunResponse.Value;
             }
@@ -69,6 +72,17 @@ public class AgentService : IAgentService
             if (run.Status != RunStatus.Completed)
             {
                 _logger.LogWarning("Agent run did not complete successfully. Status: {Status}", run.Status);
+                
+                // Clean up the thread
+                try
+                {
+                    await _agentClient.Threads.DeleteThreadAsync(thread.Id);
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
+                }
+                
                 return new ChatResponse
                 {
                     Response = $"The agent encountered an issue. Status: {run.Status}"
@@ -82,6 +96,7 @@ public class AgentService : IAgentService
             );
 
             // Find the first assistant message (which should be the response)
+            string? agentResponse = null;
             await foreach (var msg in messages)
             {
                 if (msg.Role == MessageRole.Agent)
@@ -91,18 +106,27 @@ public class AgentService : IAgentService
                     {
                         if (content is MessageTextContent textContent)
                         {
-                            return new ChatResponse
-                            {
-                                Response = textContent.Text
-                            };
+                            agentResponse = textContent.Text;
+                            break;
                         }
                     }
+                    if (agentResponse != null) break;
                 }
+            }
+
+            // Clean up the thread after getting the response
+            try
+            {
+                await _agentClient.Threads.DeleteThreadAsync(thread.Id);
+            }
+            catch (Exception cleanupEx)
+            {
+                _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
             }
 
             return new ChatResponse
             {
-                Response = "No response from agent."
+                Response = agentResponse ?? "No response from agent."
             };
         }
         catch (Exception ex)
@@ -122,18 +146,26 @@ public class AgentService : IAgentService
             return; // Already initialized
         }
 
-        // Get configuration for Microsoft Foundry
-        var foundryEndpoint = _configuration["FoundryAgent:Endpoint"];
-        _agentId = _configuration["FoundryAgent:AgentId"];
-
-        if (string.IsNullOrEmpty(foundryEndpoint) || string.IsNullOrEmpty(_agentId))
-        {
-            _logger.LogWarning("Foundry agent not configured. Please set FoundryAgent:Endpoint and FoundryAgent:AgentId in appsettings.json");
-            return;
-        }
-
+        // Use semaphore to ensure thread-safe initialization
+        await _initializationLock.WaitAsync();
         try
         {
+            // Double-check after acquiring lock
+            if (_agentClient != null)
+            {
+                return;
+            }
+
+            // Get configuration for Microsoft Foundry
+            var foundryEndpoint = _configuration["FoundryAgent:Endpoint"];
+            _agentId = _configuration["FoundryAgent:AgentId"];
+
+            if (string.IsNullOrEmpty(foundryEndpoint) || string.IsNullOrEmpty(_agentId))
+            {
+                _logger.LogWarning("Foundry agent not configured. Please set FoundryAgent:Endpoint and FoundryAgent:AgentId in appsettings.json");
+                return;
+            }
+
             // Create the agent client with Azure authentication
             // DefaultAzureCredential will use various credential sources in order:
             // 1. Environment variables
@@ -150,6 +182,10 @@ public class AgentService : IAgentService
         {
             _logger.LogError(ex, "Failed to initialize Foundry agent client");
             throw;
+        }
+        finally
+        {
+            _initializationLock.Release();
         }
     }
 }
