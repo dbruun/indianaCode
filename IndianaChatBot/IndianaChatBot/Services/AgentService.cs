@@ -1,22 +1,24 @@
-using Azure.AI.Agents.Persistent;
+using Azure.AI.Projects;
+using Azure.AI.Projects.OpenAI;
 using Azure.Identity;
-using Microsoft.Extensions.AI;
+using OpenAI.Responses;
+
+#pragma warning disable OPENAI001
 
 namespace IndianaChatBot.Services;
 
 /// <summary>
 /// Agent service that connects to a Microsoft Foundry hosted agent
-/// using the Agentic Framework SDK
+/// using the Azure AI Projects SDK
 /// </summary>
 public class AgentService : IAgentService, IDisposable
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<AgentService> _logger;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
-    private PersistentAgentsClient? _agentClient;
-    private string? _agentId;
-    private int _pollingIntervalMs;
-    private int _pollingTimeoutMs;
+    private AIProjectClient? _projectClient;
+    private ProjectResponsesClient? _responsesClient;
+    private string? _agentName;
     private bool _disposed;
 
     public AgentService(
@@ -25,8 +27,6 @@ public class AgentService : IAgentService, IDisposable
     {
         _configuration = configuration;
         _logger = logger;
-        _pollingIntervalMs = _configuration.GetValue<int>("FoundryAgent:PollingIntervalMs", 500);
-        _pollingTimeoutMs = _configuration.GetValue<int>("FoundryAgent:PollingTimeoutMs", 60000); // Default 60 seconds
     }
 
     public async Task<ChatResponse> GetResponseAsync(string message)
@@ -36,118 +36,18 @@ public class AgentService : IAgentService, IDisposable
             // Initialize the agent client if not already done
             await EnsureAgentClientInitializedAsync();
 
-            if (_agentClient == null || string.IsNullOrEmpty(_agentId))
+            if (_responsesClient == null)
             {
                 return new ChatResponse
                 {
-                    Response = "Agent not configured. Please configure your Microsoft Foundry endpoint and agent ID in appsettings.json."
+                    Response = "Agent not configured. Please configure your Microsoft Foundry endpoint and agent name in appsettings.json."
                 };
             }
 
-            // Get the agent
-            var getAgentResponse = await _agentClient.Administration.GetAgentAsync(_agentId);
-            var agent = getAgentResponse.Value;
-
-            // Create a new thread for this conversation
-            var threadResponse = await _agentClient.Threads.CreateThreadAsync();
-            var thread = threadResponse.Value;
-
-            // Add the user's message to the thread
-            await _agentClient.Messages.CreateMessageAsync(
-                thread.Id,
-                MessageRole.User,
-                message
-            );
-
-            // Run the agent on the thread
-            var runResponse = await _agentClient.Runs.CreateRunAsync(thread.Id, agent.Id);
-            var run = runResponse.Value;
-
-            // Poll for completion with timeout
-            var startTime = DateTime.UtcNow;
-            while (run.Status == RunStatus.Queued || run.Status == RunStatus.InProgress)
-            {
-                // Check if we've exceeded the timeout
-                if ((DateTime.UtcNow - startTime).TotalMilliseconds > _pollingTimeoutMs)
-                {
-                    _logger.LogWarning("Agent run timed out after {TimeoutMs}ms", _pollingTimeoutMs);
-                    
-                    // Clean up the thread
-                    try
-                    {
-                        await _agentClient.Threads.DeleteThreadAsync(thread.Id);
-                    }
-                    catch (Exception cleanupEx)
-                    {
-                        _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
-                    }
-                    
-                    return new ChatResponse
-                    {
-                        Response = "The request timed out. Please try again."
-                    };
-                }
-
-                await Task.Delay(_pollingIntervalMs);
-                var updatedRunResponse = await _agentClient.Runs.GetRunAsync(thread.Id, run.Id);
-                run = updatedRunResponse.Value;
-            }
-
-            // Check if the run completed successfully
-            if (run.Status != RunStatus.Completed)
-            {
-                _logger.LogWarning("Agent run did not complete successfully. Status: {Status}", run.Status);
-                
-                // Clean up the thread
-                try
-                {
-                    await _agentClient.Threads.DeleteThreadAsync(thread.Id);
-                }
-                catch (Exception cleanupEx)
-                {
-                    _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
-                }
-                
-                return new ChatResponse
-                {
-                    Response = $"The agent encountered an issue. Status: {run.Status}"
-                };
-            }
-
-            // Get the messages from the thread (newest first)
-            var messages = _agentClient.Messages.GetMessagesAsync(
-                threadId: thread.Id,
-                order: ListSortOrder.Descending
-            );
-
-            // Find the first assistant message (which should be the response)
-            string? agentResponse = null;
-            await foreach (var msg in messages)
-            {
-                if (msg.Role == MessageRole.Agent)
-                {
-                    // Extract text content from the message
-                    foreach (var content in msg.ContentItems)
-                    {
-                        if (content is MessageTextContent textContent)
-                        {
-                            agentResponse = textContent.Text;
-                            break;
-                        }
-                    }
-                    if (agentResponse != null) break;
-                }
-            }
-
-            // Clean up the thread after getting the response
-            try
-            {
-                await _agentClient.Threads.DeleteThreadAsync(thread.Id);
-            }
-            catch (Exception cleanupEx)
-            {
-                _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
-            }
+            // Use the agent to generate a response
+            ResponseResult response = _responsesClient.CreateResponse(message);
+            
+            string agentResponse = response.GetOutputText();
 
             return new ChatResponse
             {
@@ -166,7 +66,7 @@ public class AgentService : IAgentService, IDisposable
 
     private async Task EnsureAgentClientInitializedAsync()
     {
-        if (_agentClient != null)
+        if (_responsesClient != null)
         {
             return; // Already initialized
         }
@@ -176,22 +76,22 @@ public class AgentService : IAgentService, IDisposable
         try
         {
             // Double-check after acquiring lock
-            if (_agentClient != null)
+            if (_responsesClient != null)
             {
                 return;
             }
 
             // Get configuration for Microsoft Foundry
             var foundryEndpoint = _configuration["FoundryAgent:Endpoint"];
-            _agentId = _configuration["FoundryAgent:AgentId"];
+            _agentName = _configuration["FoundryAgent:AgentName"];
 
-            if (string.IsNullOrEmpty(foundryEndpoint) || string.IsNullOrEmpty(_agentId))
+            if (string.IsNullOrEmpty(foundryEndpoint) || string.IsNullOrEmpty(_agentName))
             {
-                _logger.LogWarning("Foundry agent not configured. Please set FoundryAgent:Endpoint and FoundryAgent:AgentId in appsettings.json");
+                _logger.LogWarning("Foundry agent not configured. Please set FoundryAgent:Endpoint and FoundryAgent:AgentName in appsettings.json");
                 return;
             }
 
-            // Create the agent client with Azure authentication
+            // Create the project client with Azure authentication
             // DefaultAzureCredential will use various credential sources in order:
             // 1. Environment variables
             // 2. Managed Identity (when deployed to Azure)
@@ -200,7 +100,19 @@ public class AgentService : IAgentService, IDisposable
             // 5. Azure PowerShell
             var credential = new DefaultAzureCredential();
             
-            _agentClient = new PersistentAgentsClient(foundryEndpoint, credential);
+            _projectClient = new AIProjectClient(
+                endpoint: new Uri(foundryEndpoint), 
+                tokenProvider: credential
+            );
+
+            // Get the agent by name
+            var agentResult = _projectClient.Agents.GetAgent(_agentName);
+            var agentRecord = agentResult.Value;
+            _logger.LogInformation("Successfully retrieved agent: {AgentName} (id: {AgentId})", agentRecord.Name, agentRecord.Id);
+
+            // Get the responses client for this agent
+            _responsesClient = _projectClient.OpenAI.GetProjectResponsesClientForAgent(agentRecord);
+            
             _logger.LogInformation("Successfully initialized Foundry agent client");
         }
         catch (Exception ex)
