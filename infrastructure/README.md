@@ -16,19 +16,42 @@ The Bicep templates automatically deploy:
 
 ## Quick Start
 
-### 1. Login to Azure
+### Option 1: Automated Deployment Script (Recommended)
+
+Use the provided deployment scripts for a guided deployment experience:
+
+**Linux/macOS:**
+```bash
+./infrastructure/deploy.sh
+```
+
+**Windows PowerShell:**
+```powershell
+.\infrastructure\deploy.ps1
+```
+
+These scripts will:
+- ✅ Verify Azure CLI is installed
+- ✅ Check you're logged in to Azure
+- ✅ Deploy all resources
+- ✅ Retrieve and display API keys
+- ✅ Show configuration instructions
+
+### Option 2: Manual Deployment
+
+#### 1. Login to Azure
 
 ```bash
 az login
 ```
 
-### 2. Set Your Subscription (if you have multiple)
+#### 2. Set Your Subscription (if you have multiple)
 
 ```bash
 az account set --subscription "Your-Subscription-Name-or-ID"
 ```
 
-### 3. Deploy the Infrastructure
+#### 3. Deploy the Infrastructure
 
 ```bash
 # Deploy with default parameters
@@ -43,18 +66,24 @@ az deployment sub create \
   --parameters infrastructure/main.parameters.json
 ```
 
-### 4. Retrieve API Keys
+#### 4. Retrieve API Keys
 
 After deployment completes, get the API key:
 
 ```bash
+# Replace 'main' with your deployment name if different
+DEPLOYMENT_NAME="main"
+
 # Get the Bing Search account name from outputs
 BING_SEARCH_NAME=$(az deployment sub show \
-  --name main \
+  --name $DEPLOYMENT_NAME \
   --query properties.outputs.bingSearchAccountName.value \
   -o tsv)
 
 RESOURCE_GROUP=$(az deployment sub show \
+  --name $DEPLOYMENT_NAME \
+  --query properties.outputs.resourceGroupName.value \
+  -o tsv)
   --name main \
   --query properties.outputs.resourceGroupName.value \
   -o tsv)
@@ -85,6 +114,9 @@ Copy the API key and update your `IndianaChatBot/appsettings.json`:
 - **main.bicep**: Main template that creates the resource group and orchestrates deployment
 - **bingSearch.bicep**: Module that creates the Bing Custom Search resource
 - **main.parameters.json**: Parameter file for customizing the deployment
+- **deploy.sh**: Bash script for automated deployment (Linux/macOS)
+- **deploy.ps1**: PowerShell script for automated deployment (Windows)
+- **README.md**: This documentation file
 
 ## Customization
 
