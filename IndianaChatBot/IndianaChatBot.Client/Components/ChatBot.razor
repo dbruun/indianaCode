@@ -1,0 +1,157 @@
+@using Microsoft.AspNetCore.Components.Web
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<div class="chatbot-container @(IsVisible ? "visible" : "")">
+    <div class="chatbot-header">
+        <h3>💬 Chat Assistant</h3>
+        <button class="close-btn" @onclick="ToggleChat">✕</button>
+    </div>
+    
+    <div class="chatbot-messages" @ref="messageContainer">
+        @foreach (var message in messages)
+        {
+            <div class="message @(message.IsUser ? "user-message" : "bot-message")">
+                <div class="message-content">
+                    <strong>@(message.IsUser ? "You" : "Assistant"):</strong>
+                    <div>@message.Text</div>
+                    @if (!string.IsNullOrEmpty(message.Source))
+                    {
+                        <small class="message-source">Source: @message.Source</small>
+                    }
+                </div>
+            </div>
+        }
+        @if (isLoading)
+        {
+            <div class="message bot-message">
+                <div class="message-content">
+                    <div class="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+    
+    <div class="chatbot-input">
+        <input 
+            type="text" 
+            @bind="currentMessage" 
+            @bind:event="oninput"
+            @onkeypress="HandleKeyPress"
+            placeholder="Type your message..." 
+            disabled="@isLoading" />
+        <button @onclick="SendMessage" disabled="@(isLoading || string.IsNullOrWhiteSpace(currentMessage))">
+            Send
+        </button>
+    </div>
+</div>
+
+<button class="chatbot-toggle" @onclick="ToggleChat">
+    💬
+</button>
+
+@code {
+    private ElementReference messageContainer;
+    private List<ChatMessage> messages = new();
+    private string currentMessage = string.Empty;
+    private bool isLoading = false;
+    private bool IsVisible = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Add welcome message
+        messages.Add(new ChatMessage
+        {
+            Text = "Hello! I'm your AI assistant powered by Microsoft Foundry. Ask me anything!",
+            IsUser = false
+        });
+    }
+
+    private void ToggleChat()
+    {
+        IsVisible = !IsVisible;
+        StateHasChanged();
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(currentMessage))
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(currentMessage) || isLoading)
+            return;
+
+        var userMessage = currentMessage;
+        currentMessage = string.Empty;
+
+        // Add user message
+        messages.Add(new ChatMessage
+        {
+            Text = userMessage,
+            IsUser = true
+        });
+
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            // Send to backend API
+            var response = await Http.PostAsJsonAsync("/api/chat", new { message = userMessage });
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<ChatResponse>();
+                messages.Add(new ChatMessage
+                {
+                    Text = result?.Response ?? "I apologize, but I couldn't process your request.",
+                    IsUser = false,
+                    Source = result?.Source
+                });
+            }
+            else
+            {
+                messages.Add(new ChatMessage
+                {
+                    Text = "Sorry, I encountered an error. Please try again.",
+                    IsUser = false
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            messages.Add(new ChatMessage
+            {
+                Text = $"Error: {ex.Message}",
+                IsUser = false
+            });
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private class ChatMessage
+    {
+        public string Text { get; set; } = string.Empty;
+        public bool IsUser { get; set; }
+        public string? Source { get; set; }
+    }
+
+    private class ChatResponse
+    {
+        public string Response { get; set; } = string.Empty;
+        public string? Source { get; set; }
+    }
+}
