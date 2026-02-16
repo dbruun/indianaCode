@@ -8,7 +8,7 @@ namespace IndianaChatBot.Services;
 /// Agent service that connects to a Microsoft Foundry hosted agent
 /// using the Agentic Framework SDK
 /// </summary>
-public class AgentService : IAgentService
+public class AgentService : IAgentService, IDisposable
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<AgentService> _logger;
@@ -16,6 +16,8 @@ public class AgentService : IAgentService
     private PersistentAgentsClient? _agentClient;
     private string? _agentId;
     private int _pollingIntervalMs;
+    private int _pollingTimeoutMs;
+    private bool _disposed;
 
     public AgentService(
         IConfiguration configuration,
@@ -24,6 +26,7 @@ public class AgentService : IAgentService
         _configuration = configuration;
         _logger = logger;
         _pollingIntervalMs = _configuration.GetValue<int>("FoundryAgent:PollingIntervalMs", 500);
+        _pollingTimeoutMs = _configuration.GetValue<int>("FoundryAgent:PollingTimeoutMs", 60000); // Default 60 seconds
     }
 
     public async Task<ChatResponse> GetResponseAsync(string message)
@@ -60,9 +63,31 @@ public class AgentService : IAgentService
             var runResponse = await _agentClient.Runs.CreateRunAsync(thread.Id, agent.Id);
             var run = runResponse.Value;
 
-            // Poll for completion
+            // Poll for completion with timeout
+            var startTime = DateTime.UtcNow;
             while (run.Status == RunStatus.Queued || run.Status == RunStatus.InProgress)
             {
+                // Check if we've exceeded the timeout
+                if ((DateTime.UtcNow - startTime).TotalMilliseconds > _pollingTimeoutMs)
+                {
+                    _logger.LogWarning("Agent run timed out after {TimeoutMs}ms", _pollingTimeoutMs);
+                    
+                    // Clean up the thread
+                    try
+                    {
+                        await _agentClient.Threads.DeleteThreadAsync(thread.Id);
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
+                    }
+                    
+                    return new ChatResponse
+                    {
+                        Response = "The request timed out. Please try again."
+                    };
+                }
+
                 await Task.Delay(_pollingIntervalMs);
                 var updatedRunResponse = await _agentClient.Runs.GetRunAsync(thread.Id, run.Id);
                 run = updatedRunResponse.Value;
@@ -187,5 +212,16 @@ public class AgentService : IAgentService
         {
             _initializationLock.Release();
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _initializationLock?.Dispose();
+        _disposed = true;
     }
 }
