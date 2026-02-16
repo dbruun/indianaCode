@@ -11,8 +11,8 @@ builder.Services.AddRazorComponents()
 // Add Controllers for API endpoints
 builder.Services.AddControllers();
 
-// Register HttpClient for services and the Agent Service
-builder.Services.AddHttpClient<IAgentService, AgentService>();
+// Register the Agent Service as a singleton
+builder.Services.AddSingleton<IAgentService, AgentService>();
 
 var app = builder.Build();
 

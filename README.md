@@ -2,13 +2,13 @@
 
 ## Indiana ChatBot - .NET 10 SPA with AI Agent
 
-A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring an AI-powered chatbot that integrates with Microsoft Foundry hosted agents and Bing Custom Search for grounding.
+A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring an AI-powered chatbot that connects to Microsoft Foundry hosted agents using the Azure AI Agents SDK.
 
 ### Features
 
 - 🎨 **Modern SPA**: Built with Blazor WebAssembly for a responsive single-page application experience
-- 🤖 **AI-Powered Chat**: Integrated with Microsoft Foundry Agent Framework
-- 🔍 **Grounded Responses**: Uses Bing Custom Search for accurate, source-backed answers
+- 🤖 **AI-Powered Chat**: Integrated with Microsoft Foundry Agent using Azure AI Agents SDK
+- 🔒 **Secure Authentication**: Uses Azure DefaultAzureCredential for seamless authentication
 - 💬 **Interactive UI**: Beautiful chatbot interface with typing indicators and smooth animations
 - ⚡ **Real-time**: WebAssembly-based client with API backend for fast responses
 
@@ -16,19 +16,18 @@ A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring 
 
 - **.NET 10**: Latest .NET framework
 - **Blazor WebAssembly**: Client-side SPA framework
-- **Microsoft.Extensions.AI**: Agent Framework integration
+- **Azure.AI.Agents.Persistent**: Azure AI Agents SDK for connecting to Foundry agents
+- **Azure.Identity**: Azure authentication
 - **ASP.NET Core Web API**: Backend API for agent communication
-- **Bing Custom Search API**: Grounding and information retrieval
 
 ### Getting Started
 
 #### Prerequisites
 
 - .NET 10 SDK
-- Microsoft Foundry account with agent deployment
-- Bing Custom Search API subscription (optional but recommended)
-
-> **💡 Quick Deploy**: Use our [Azure Bicep templates](infrastructure/README.md) to automatically deploy the Bing Custom Search resource!
+- Azure AI Foundry project with a deployed agent
+- Azure CLI (for authentication) or other Azure credential method
+- Agent ID from your Foundry project
 
 #### Configuration
 
@@ -38,37 +37,39 @@ A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring 
    cd indianaCode/IndianaChatBot
    ```
 
-2. **Deploy Azure Resources (Optional but Recommended)**
+2. **Set up your Foundry Agent**
    
-   Deploy Bing Custom Search using our automated Bicep templates:
-   
-   ```bash
-   # Deploy infrastructure
-   az deployment sub create \
-     --location eastus \
-     --template-file infrastructure/main.bicep
-   ```
-   
-   See [infrastructure/README.md](infrastructure/README.md) for detailed deployment instructions.
+   In Azure AI Foundry:
+   - Create a new agent or use an existing one
+   - Configure any tools or connections (like Bing Custom Search) within Foundry
+   - Note your project endpoint and agent ID
 
-3. **Configure API Keys**
+3. **Configure the Application**
    
-   Edit `IndianaChatBot/appsettings.json` and add your credentials:
+   Edit `IndianaChatBot/appsettings.json`:
    
    ```json
    {
      "FoundryAgent": {
-       "Endpoint": "https://your-foundry-endpoint.azure.com/openai/deployments/your-deployment/chat/completions?api-version=2024-02-15-preview",
-       "ApiKey": "YOUR_FOUNDRY_API_KEY"
-     },
-     "BingSearch": {
-       "ApiKey": "YOUR_BING_SEARCH_API_KEY",
-       "CustomConfigId": "YOUR_CUSTOM_CONFIG_ID"
+       "Endpoint": "https://your-foundry-resource.services.ai.azure.com/api/projects/your-project",
+       "AgentId": "your-agent-id"
      }
    }
    ```
 
-   **Note**: The application will work in demo mode without these credentials, showing helpful messages to guide configuration.
+4. **Set up Azure Authentication**
+   
+   The application uses `DefaultAzureCredential` which will try these methods in order:
+   - Environment variables
+   - Managed Identity (when deployed to Azure)
+   - Visual Studio credentials
+   - Azure CLI credentials
+   - Azure PowerShell credentials
+   
+   For local development, sign in with Azure CLI:
+   ```bash
+   az login
+   ```
 
 #### Running the Application
 
@@ -97,7 +98,7 @@ A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring 
 1. Click the chat button (💬) in the bottom-right corner of the page
 2. Type your question in the chat input
 3. Press Enter or click "Send"
-4. The AI assistant will respond with information grounded by Bing Custom Search
+4. The AI assistant will respond using your configured Foundry agent
 
 ### Project Structure
 
@@ -108,7 +109,7 @@ IndianaChatBot/
 │   │   └── ChatController.cs        # API endpoint for chat
 │   ├── Services/
 │   │   ├── IAgentService.cs         # Service interface
-│   │   └── AgentService.cs          # Agent implementation with Foundry & Bing integration
+│   │   └── AgentService.cs          # Agent implementation with Foundry SDK
 │   ├── Components/                  # Server-side Blazor components
 │   ├── appsettings.json             # Configuration file
 │   └── Program.cs                   # Server startup
@@ -134,15 +135,23 @@ The application follows a clean architecture pattern:
    - RESTful endpoint: POST /api/chat
 
 3. **Service Layer**:
-   - AgentService: Orchestrates Microsoft Foundry and Bing Search
-   - Implements grounding with search results
-   - Handles fallback for unconfigured services
+   - AgentService: Connects to Foundry agent using Azure AI Agents SDK
+   - Creates conversation threads and manages message flow
+   - Uses Azure authentication for secure access
+
+### How It Works
+
+1. When a user sends a message, the service creates a new conversation thread
+2. The user's message is added to the thread
+3. The agent is invoked with the thread context
+4. The system polls for completion of the agent's response
+5. The agent's response is extracted and returned to the user
 
 ### Security Considerations
 
-- Never commit API keys to source control
-- Use environment variables or Azure Key Vault in production
-- The provided appsettings.json contains placeholder values only
+- Uses Azure DefaultAzureCredential for authentication (no API keys in code)
+- Never commit credentials to source control
+- Use Managed Identity when deploying to Azure
 - Consider implementing rate limiting for production deployments
 
 ### Development
@@ -156,7 +165,8 @@ To modify the chatbot behavior:
 ### Troubleshooting
 
 - **Chat button not appearing**: Ensure the client project is built and the server is running
-- **No responses**: Check that API keys are configured in appsettings.json
+- **Authentication errors**: Verify you're logged in with `az login` or have proper credentials configured
+- **No responses**: Check that Endpoint and AgentId are configured correctly in appsettings.json
 - **Build errors**: Verify .NET 10 SDK is installed with `dotnet --version`
 
 ### License

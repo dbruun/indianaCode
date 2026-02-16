@@ -1,66 +1,157 @@
+using Azure.AI.Agents.Persistent;
+using Azure.Identity;
 using Microsoft.Extensions.AI;
-using System.Net.Http.Json;
 
 namespace IndianaChatBot.Services;
 
 /// <summary>
-/// Agent service that integrates with Microsoft Foundry hosted agent
-/// and uses Bing Custom Search for grounding
+/// Agent service that connects to a Microsoft Foundry hosted agent
+/// using the Agentic Framework SDK
 /// </summary>
-public class AgentService : IAgentService
+public class AgentService : IAgentService, IDisposable
 {
     private readonly IConfiguration _configuration;
-    private readonly HttpClient _httpClient;
     private readonly ILogger<AgentService> _logger;
+    private readonly SemaphoreSlim _initializationLock = new(1, 1);
+    private PersistentAgentsClient? _agentClient;
+    private string? _agentId;
+    private int _pollingIntervalMs;
+    private int _pollingTimeoutMs;
+    private bool _disposed;
 
     public AgentService(
         IConfiguration configuration,
-        HttpClient httpClient,
         ILogger<AgentService> logger)
     {
         _configuration = configuration;
-        _httpClient = httpClient;
         _logger = logger;
+        _pollingIntervalMs = _configuration.GetValue<int>("FoundryAgent:PollingIntervalMs", 500);
+        _pollingTimeoutMs = _configuration.GetValue<int>("FoundryAgent:PollingTimeoutMs", 60000); // Default 60 seconds
     }
 
     public async Task<ChatResponse> GetResponseAsync(string message)
     {
         try
         {
-            // Get configuration for Microsoft Foundry and Bing Search
-            var foundryEndpoint = _configuration["FoundryAgent:Endpoint"] ?? string.Empty;
-            var foundryApiKey = _configuration["FoundryAgent:ApiKey"] ?? string.Empty;
-            var bingSearchKey = _configuration["BingSearch:ApiKey"] ?? string.Empty;
-            var bingCustomConfigId = _configuration["BingSearch:CustomConfigId"] ?? string.Empty;
+            // Initialize the agent client if not already done
+            await EnsureAgentClientInitializedAsync();
 
-            // Step 1: Get grounding information from Bing Custom Search (if configured)
-            string groundingContext = string.Empty;
-            string? sourceUrl = null;
-
-            if (!string.IsNullOrEmpty(bingSearchKey) && !string.IsNullOrEmpty(bingCustomConfigId))
+            if (_agentClient == null || string.IsNullOrEmpty(_agentId))
             {
-                var searchResult = await PerformBingSearchAsync(message, bingSearchKey, bingCustomConfigId);
-                groundingContext = searchResult.Context;
-                sourceUrl = searchResult.Url;
+                return new ChatResponse
+                {
+                    Response = "Agent not configured. Please configure your Microsoft Foundry endpoint and agent ID in appsettings.json."
+                };
             }
 
-            // Step 2: Call Microsoft Foundry Agent with grounding context
-            string agentResponse;
-            
-            if (!string.IsNullOrEmpty(foundryEndpoint) && !string.IsNullOrEmpty(foundryApiKey))
+            // Get the agent
+            var getAgentResponse = await _agentClient.Administration.GetAgentAsync(_agentId);
+            var agent = getAgentResponse.Value;
+
+            // Create a new thread for this conversation
+            var threadResponse = await _agentClient.Threads.CreateThreadAsync();
+            var thread = threadResponse.Value;
+
+            // Add the user's message to the thread
+            await _agentClient.Messages.CreateMessageAsync(
+                thread.Id,
+                MessageRole.User,
+                message
+            );
+
+            // Run the agent on the thread
+            var runResponse = await _agentClient.Runs.CreateRunAsync(thread.Id, agent.Id);
+            var run = runResponse.Value;
+
+            // Poll for completion with timeout
+            var startTime = DateTime.UtcNow;
+            while (run.Status == RunStatus.Queued || run.Status == RunStatus.InProgress)
             {
-                agentResponse = await CallFoundryAgentAsync(message, groundingContext, foundryEndpoint, foundryApiKey);
+                // Check if we've exceeded the timeout
+                if ((DateTime.UtcNow - startTime).TotalMilliseconds > _pollingTimeoutMs)
+                {
+                    _logger.LogWarning("Agent run timed out after {TimeoutMs}ms", _pollingTimeoutMs);
+                    
+                    // Clean up the thread
+                    try
+                    {
+                        await _agentClient.Threads.DeleteThreadAsync(thread.Id);
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
+                    }
+                    
+                    return new ChatResponse
+                    {
+                        Response = "The request timed out. Please try again."
+                    };
+                }
+
+                await Task.Delay(_pollingIntervalMs);
+                var updatedRunResponse = await _agentClient.Runs.GetRunAsync(thread.Id, run.Id);
+                run = updatedRunResponse.Value;
             }
-            else
+
+            // Check if the run completed successfully
+            if (run.Status != RunStatus.Completed)
             {
-                // Fallback to a simple response if Foundry is not configured
-                agentResponse = GenerateFallbackResponse(message, groundingContext);
+                _logger.LogWarning("Agent run did not complete successfully. Status: {Status}", run.Status);
+                
+                // Clean up the thread
+                try
+                {
+                    await _agentClient.Threads.DeleteThreadAsync(thread.Id);
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
+                }
+                
+                return new ChatResponse
+                {
+                    Response = $"The agent encountered an issue. Status: {run.Status}"
+                };
+            }
+
+            // Get the messages from the thread (newest first)
+            var messages = _agentClient.Messages.GetMessagesAsync(
+                threadId: thread.Id,
+                order: ListSortOrder.Descending
+            );
+
+            // Find the first assistant message (which should be the response)
+            string? agentResponse = null;
+            await foreach (var msg in messages)
+            {
+                if (msg.Role == MessageRole.Agent)
+                {
+                    // Extract text content from the message
+                    foreach (var content in msg.ContentItems)
+                    {
+                        if (content is MessageTextContent textContent)
+                        {
+                            agentResponse = textContent.Text;
+                            break;
+                        }
+                    }
+                    if (agentResponse != null) break;
+                }
+            }
+
+            // Clean up the thread after getting the response
+            try
+            {
+                await _agentClient.Threads.DeleteThreadAsync(thread.Id);
+            }
+            catch (Exception cleanupEx)
+            {
+                _logger.LogWarning(cleanupEx, "Failed to clean up thread {ThreadId}", thread.Id);
             }
 
             return new ChatResponse
             {
-                Response = agentResponse,
-                Source = sourceUrl
+                Response = agentResponse ?? "No response from agent."
             };
         }
         catch (Exception ex)
@@ -73,138 +164,64 @@ public class AgentService : IAgentService
         }
     }
 
-    private async Task<(string Context, string? Url)> PerformBingSearchAsync(
-        string query, 
-        string apiKey, 
-        string customConfigId)
+    private async Task EnsureAgentClientInitializedAsync()
     {
+        if (_agentClient != null)
+        {
+            return; // Already initialized
+        }
+
+        // Use semaphore to ensure thread-safe initialization
+        await _initializationLock.WaitAsync();
         try
         {
-            // Bing Custom Search API endpoint
-            var searchUrl = $"https://api.bing.microsoft.com/v7.0/custom/search?q={Uri.EscapeDataString(query)}&customconfig={customConfigId}&count=3";
-
-            var request = new HttpRequestMessage(HttpMethod.Get, searchUrl);
-            request.Headers.Add("Ocp-Apim-Subscription-Key", apiKey);
-
-            var response = await _httpClient.SendAsync(request);
-
-            if (response.IsSuccessStatusCode)
+            // Double-check after acquiring lock
+            if (_agentClient != null)
             {
-                var searchResult = await response.Content.ReadFromJsonAsync<BingSearchResult>();
-                
-                if (searchResult?.WebPages?.Value != null && searchResult.WebPages.Value.Length > 0)
-                {
-                    var topResult = searchResult.WebPages.Value[0];
-                    var context = $"Based on search results: {topResult.Snippet}";
-                    return (context, topResult.Url);
-                }
+                return;
             }
 
-            return (string.Empty, null);
+            // Get configuration for Microsoft Foundry
+            var foundryEndpoint = _configuration["FoundryAgent:Endpoint"];
+            _agentId = _configuration["FoundryAgent:AgentId"];
+
+            if (string.IsNullOrEmpty(foundryEndpoint) || string.IsNullOrEmpty(_agentId))
+            {
+                _logger.LogWarning("Foundry agent not configured. Please set FoundryAgent:Endpoint and FoundryAgent:AgentId in appsettings.json");
+                return;
+            }
+
+            // Create the agent client with Azure authentication
+            // DefaultAzureCredential will use various credential sources in order:
+            // 1. Environment variables
+            // 2. Managed Identity (when deployed to Azure)
+            // 3. Visual Studio
+            // 4. Azure CLI
+            // 5. Azure PowerShell
+            var credential = new DefaultAzureCredential();
+            
+            _agentClient = new PersistentAgentsClient(foundryEndpoint, credential);
+            _logger.LogInformation("Successfully initialized Foundry agent client");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error performing Bing search");
-            return (string.Empty, null);
+            _logger.LogError(ex, "Failed to initialize Foundry agent client");
+            throw;
         }
-    }
-
-    private async Task<string> CallFoundryAgentAsync(
-        string message, 
-        string groundingContext, 
-        string endpoint, 
-        string apiKey)
-    {
-        try
+        finally
         {
-            // Construct the prompt with grounding context
-            var prompt = string.IsNullOrEmpty(groundingContext) 
-                ? message 
-                : $"{groundingContext}\n\nUser question: {message}";
-
-            // Create the request for Microsoft Foundry Agent
-            var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
-            request.Headers.Add("api-key", apiKey);
-            
-            var requestBody = new
-            {
-                messages = new[]
-                {
-                    new { role = "system", content = "You are a helpful AI assistant. Use the provided context to answer questions accurately." },
-                    new { role = "user", content = prompt }
-                },
-                max_tokens = 500,
-                temperature = 0.7
-            };
-
-            request.Content = JsonContent.Create(requestBody);
-
-            var response = await _httpClient.SendAsync(request);
-            
-            if (response.IsSuccessStatusCode)
-            {
-                var result = await response.Content.ReadFromJsonAsync<FoundryResponse>();
-                return result?.Choices?[0]?.Message?.Content ?? "I couldn't generate a response.";
-            }
-
-            _logger.LogWarning("Foundry API call failed with status: {StatusCode}", response.StatusCode);
-            return GenerateFallbackResponse(message, groundingContext);
+            _initializationLock.Release();
         }
-        catch (Exception ex)
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
         {
-            _logger.LogWarning(ex, "Error calling Foundry agent");
-            return GenerateFallbackResponse(message, groundingContext);
-        }
-    }
-
-    private string GenerateFallbackResponse(string message, string groundingContext)
-    {
-        // Provide a helpful response indicating the service is in demo mode
-        if (!string.IsNullOrEmpty(groundingContext))
-        {
-            return $"Based on available information: {groundingContext}\n\n" +
-                   $"To get AI-powered responses, please configure your Microsoft Foundry agent credentials in appsettings.json.";
+            return;
         }
 
-        return "Hello! I'm your AI assistant. To enable full functionality, please configure:\n\n" +
-               "1. Microsoft Foundry Agent endpoint and API key\n" +
-               "2. Bing Custom Search API key and custom config ID\n\n" +
-               "These settings should be added to your appsettings.json file.";
+        _initializationLock?.Dispose();
+        _disposed = true;
     }
-
-    #region API Response Models
-
-    private class BingSearchResult
-    {
-        public WebPages? WebPages { get; set; }
-    }
-
-    private class WebPages
-    {
-        public WebPage[]? Value { get; set; }
-    }
-
-    private class WebPage
-    {
-        public string Name { get; set; } = string.Empty;
-        public string Url { get; set; } = string.Empty;
-        public string Snippet { get; set; } = string.Empty;
-    }
-
-    private class FoundryResponse
-    {
-        public Choice[]? Choices { get; set; }
-    }
-
-    private class Choice
-    {
-        public Message? Message { get; set; }
-    }
-
-    private class Message
-    {
-        public string Content { get; set; } = string.Empty;
-    }
-
-    #endregion
 }

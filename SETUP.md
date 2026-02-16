@@ -4,10 +4,47 @@
 
 ### 1. Prerequisites
 - .NET 10 SDK installed
-- (Optional) Microsoft Foundry account with deployed agent
-- (Optional) Bing Custom Search API subscription
+- Azure AI Foundry project with a deployed agent
+- Azure CLI (for authentication)
 
-### 2. Run the Application
+### 2. Configure Your Agent
+
+Before running the application, you need to:
+
+1. **Set up your agent in Azure AI Foundry**:
+   - Go to https://ai.azure.com
+   - Create a new project or use an existing one
+   - Create or configure an agent
+   - Add any tools or connections (like Bing Custom Search) to your agent in Foundry
+   - Note your project endpoint URL and agent ID
+
+2. **Configure appsettings.json**:
+   
+   Open `IndianaChatBot/appsettings.json` and update:
+
+   ```json
+   {
+     "FoundryAgent": {
+       "Endpoint": "https://your-foundry-resource.services.ai.azure.com/api/projects/your-project",
+       "AgentId": "your-agent-id"
+     }
+   }
+   ```
+
+   Replace:
+   - `your-foundry-resource`: Your Azure AI Foundry resource name
+   - `your-project`: Your project name
+   - `your-agent-id`: The ID of your agent (found in Foundry portal)
+
+3. **Authenticate with Azure**:
+   
+   ```bash
+   az login
+   ```
+
+   The application uses `DefaultAzureCredential` which will automatically use your Azure CLI credentials for local development.
+
+### 3. Run the Application
 
 ```bash
 cd IndianaChatBot/IndianaChatBot
@@ -16,47 +53,52 @@ dotnet run
 
 The application will start at `https://localhost:5001` (or the URL shown in console).
 
-### 3. Using the Chatbot
+### 4. Using the Chatbot
 
 1. Open your browser to the application URL
 2. Click the purple chat button (💬) in the bottom-right corner
 3. Type your message and press Enter or click Send
-4. The bot will respond (in demo mode if no API keys configured)
+4. The bot will respond using your configured Foundry agent
 
-## Configuring API Keys (Optional)
+## Azure AI Foundry Setup
 
-To enable full AI functionality with Microsoft Foundry and Bing Search:
+### Creating an Agent
 
-1. Open `IndianaChatBot/appsettings.json`
+1. Navigate to [Azure AI Foundry](https://ai.azure.com)
+2. Create a new project or select an existing one
+3. Go to the "Agents" section
+4. Click "Create Agent"
+5. Configure your agent:
+   - Choose a model (e.g., GPT-4)
+   - Add instructions for the agent's behavior
+   - Add tools or connections (e.g., Bing Custom Search)
+6. Save and deploy your agent
+7. Copy the agent ID from the agent details page
 
-2. Replace the placeholder values:
+### Getting Your Endpoint URL
 
-```json
-{
-  "FoundryAgent": {
-    "Endpoint": "https://your-actual-endpoint.azure.com/openai/deployments/your-deployment/chat/completions?api-version=2024-02-15-preview",
-    "ApiKey": "your-actual-foundry-api-key"
-  },
-  "BingSearch": {
-    "ApiKey": "your-actual-bing-api-key",
-    "CustomConfigId": "your-actual-custom-config-id"
-  }
-}
+The endpoint URL follows this format:
+```
+https://<resource-name>.services.ai.azure.com/api/projects/<project-name>
 ```
 
-3. Restart the application
+You can find this in:
+1. Azure AI Foundry portal
+2. Azure portal under your AI Foundry resource
+3. The "Settings" or "Keys and Endpoint" section of your project
 
-### Getting API Keys
+## Authentication
 
-**Microsoft Foundry:**
-1. Go to Azure OpenAI Studio or Microsoft AI Studio
-2. Deploy a model (e.g., GPT-4)
-3. Copy the endpoint URL and API key
+The application uses Azure `DefaultAzureCredential` which supports multiple authentication methods:
 
-**Bing Custom Search:**
-1. Go to https://www.microsoft.com/en-us/bing/apis/bing-custom-search-api
-2. Create a Custom Search instance
-3. Get your API key and Custom Config ID from the portal
+### Local Development
+- Sign in with Azure CLI: `az login`
+- Or use Visual Studio credentials
+- Or use Azure PowerShell credentials
+
+### Production Deployment
+- Use Managed Identity when deployed to Azure App Service or Azure Container Apps
+- Or configure environment variables with service principal credentials
 
 ## Project Structure
 
@@ -67,7 +109,7 @@ IndianaChatBot/
 │   │   └── ChatController.cs        # API endpoint
 │   ├── Services/
 │   │   ├── IAgentService.cs
-│   │   └── AgentService.cs          # AI orchestration
+│   │   └── AgentService.cs          # Foundry SDK integration
 │   ├── Components/                  # Server Blazor components
 │   └── appsettings.json             # Configuration
 │
@@ -82,22 +124,28 @@ IndianaChatBot/
 
 - ✨ Beautiful gradient-styled chat interface
 - 💬 Real-time messaging with typing indicators
-- 🤖 AI-powered responses via Microsoft Foundry
-- 🔍 Grounded answers using Bing Custom Search
+- 🤖 AI-powered responses via Microsoft Foundry agents
+- 🔒 Secure Azure authentication
 - 📱 Responsive design
 - ⌨️ Keyboard shortcuts (Enter to send)
 - 🎨 Smooth animations and transitions
 
 ## Troubleshooting
 
+### Issue: Authentication errors
+**Solution:** Ensure you're logged in with Azure CLI (`az login`) and have access to the Foundry resource.
+
+### Issue: "Agent not configured" message
+**Solution:** Verify that `Endpoint` and `AgentId` are correctly set in appsettings.json.
+
 ### Issue: Chat button not appearing
 **Solution:** Ensure both projects built successfully. Check browser console for errors.
 
-### Issue: "Error processing request" messages
-**Solution:** Verify API keys are correctly configured in appsettings.json.
-
 ### Issue: Build errors
 **Solution:** Ensure .NET 10 SDK is installed with `dotnet --version`.
+
+### Issue: Agent responses are slow
+**Solution:** This is normal - the agent needs time to process. The application polls for completion every 500ms.
 
 ## Development
 
@@ -105,7 +153,7 @@ To modify the chatbot:
 
 - **UI changes:** Edit `IndianaChatBot.Client/Components/ChatBot.razor`
 - **Styling:** Edit `IndianaChatBot.Client/Components/ChatBot.razor.css`
-- **AI logic:** Modify `IndianaChatBot/Services/AgentService.cs`
+- **Agent integration:** Modify `IndianaChatBot/Services/AgentService.cs`
 - **API:** Update `IndianaChatBot/Controllers/ChatController.cs`
 
 ## Building for Production
@@ -118,9 +166,9 @@ The published files will be in the `./publish` directory.
 
 ## Security Notes
 
-- Never commit API keys to source control
-- Use environment variables or Azure Key Vault in production
-- The provided appsettings.json contains only placeholder values
+- Uses Azure DefaultAzureCredential (no API keys in code)
+- Use Managed Identity in production deployments
+- Never commit credentials to source control
 - Consider implementing rate limiting for public deployments
 
 ## Support
