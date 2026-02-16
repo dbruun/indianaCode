@@ -16,7 +16,8 @@ A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring 
 
 - **.NET 10**: Latest .NET framework
 - **Blazor WebAssembly**: Client-side SPA framework
-- **Azure.AI.Agents.Persistent**: Azure AI Agents SDK for connecting to Foundry agents
+- **Azure.AI.Projects**: Azure AI Projects SDK for connecting to Foundry agents
+- **Azure.AI.Projects.OpenAI**: OpenAI integration for Azure AI Projects
 - **Azure.Identity**: Azure authentication
 - **ASP.NET Core Web API**: Backend API for agent communication
 
@@ -42,7 +43,7 @@ A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring 
    In Azure AI Foundry:
    - Create a new agent or use an existing one
    - Configure any tools or connections (like Bing Custom Search) within Foundry
-   - Note your project endpoint and agent ID
+   - Note your project endpoint and agent name
 
 3. **Configure the Application**
    
@@ -52,7 +53,7 @@ A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring 
    {
      "FoundryAgent": {
        "Endpoint": "https://your-foundry-resource.services.ai.azure.com/api/projects/your-project",
-       "AgentId": "your-agent-id"
+       "AgentName": "your-agent-name"
      }
    }
    ```
@@ -135,17 +136,17 @@ The application follows a clean architecture pattern:
    - RESTful endpoint: POST /api/chat
 
 3. **Service Layer**:
-   - AgentService: Connects to Foundry agent using Azure AI Agents SDK
-   - Creates conversation threads and manages message flow
+   - AgentService: Connects to Foundry agent using Azure AI Projects SDK
+   - Uses new Responses API for simplified agent interaction
    - Uses Azure authentication for secure access
 
 ### How It Works
 
-1. When a user sends a message, the service creates a new conversation thread
-2. The user's message is added to the thread
-3. The agent is invoked with the thread context
-4. The system polls for completion of the agent's response
-5. The agent's response is extracted and returned to the user
+1. When a user sends a message, the service connects to the configured agent
+2. The service uses the Azure AI Projects SDK to get an agent reference by name
+3. The OpenAI Responses API is invoked with the user's message
+4. The agent processes the request and returns a response
+5. The response is extracted and returned to the user
 
 ### Security Considerations
 
@@ -166,7 +167,7 @@ To modify the chatbot behavior:
 
 - **Chat button not appearing**: Ensure the client project is built and the server is running
 - **Authentication errors**: Verify you're logged in with `az login` or have proper credentials configured
-- **No responses**: Check that Endpoint and AgentId are configured correctly in appsettings.json
+- **No responses**: Check that Endpoint and AgentName are configured correctly in appsettings.json
 - **Build errors**: Verify .NET 10 SDK is installed with `dotnet --version`
 
 ### License

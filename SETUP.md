@@ -16,7 +16,7 @@ Before running the application, you need to:
    - Create a new project or use an existing one
    - Create or configure an agent
    - Add any tools or connections (like Bing Custom Search) to your agent in Foundry
-   - Note your project endpoint URL and agent ID
+   - Note your project endpoint URL and agent name
 
 2. **Configure appsettings.json**:
    
@@ -26,7 +26,7 @@ Before running the application, you need to:
    {
      "FoundryAgent": {
        "Endpoint": "https://your-foundry-resource.services.ai.azure.com/api/projects/your-project",
-       "AgentId": "your-agent-id"
+       "AgentName": "your-agent-name"
      }
    }
    ```
@@ -34,7 +34,7 @@ Before running the application, you need to:
    Replace:
    - `your-foundry-resource`: Your Azure AI Foundry resource name
    - `your-project`: Your project name
-   - `your-agent-id`: The ID of your agent (found in Foundry portal)
+   - `your-agent-name`: The name of your agent (found in Foundry portal)
 
 3. **Authenticate with Azure**:
    
@@ -73,7 +73,7 @@ The application will start at `https://localhost:5001` (or the URL shown in cons
    - Add instructions for the agent's behavior
    - Add tools or connections (e.g., Bing Custom Search)
 6. Save and deploy your agent
-7. Copy the agent ID from the agent details page
+7. Copy the agent name from the agent details page
 
 ### Getting Your Endpoint URL
 
@@ -109,7 +109,7 @@ IndianaChatBot/
 │   │   └── ChatController.cs        # API endpoint
 │   ├── Services/
 │   │   ├── IAgentService.cs
-│   │   └── AgentService.cs          # Foundry SDK integration
+│   │   └── AgentService.cs          # Azure AI Projects SDK integration
 │   ├── Components/                  # Server Blazor components
 │   └── appsettings.json             # Configuration
 │
@@ -136,7 +136,7 @@ IndianaChatBot/
 **Solution:** Ensure you're logged in with Azure CLI (`az login`) and have access to the Foundry resource.
 
 ### Issue: "Agent not configured" message
-**Solution:** Verify that `Endpoint` and `AgentId` are correctly set in appsettings.json.
+**Solution:** Verify that `Endpoint` and `AgentName` are correctly set in appsettings.json.
 
 ### Issue: Chat button not appearing
 **Solution:** Ensure both projects built successfully. Check browser console for errors.
@@ -145,7 +145,7 @@ IndianaChatBot/
 **Solution:** Ensure .NET 10 SDK is installed with `dotnet --version`.
 
 ### Issue: Agent responses are slow
-**Solution:** This is normal - the agent needs time to process. The application polls for completion every 500ms.
+**Solution:** Response time depends on agent complexity and workload. The new API handles polling internally for better performance.
 
 ## Development
 
