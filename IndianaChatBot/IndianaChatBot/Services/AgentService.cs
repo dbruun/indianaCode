@@ -3,6 +3,8 @@ using Azure.AI.Projects.OpenAI;
 using Azure.Identity;
 using OpenAI.Responses;
 
+// Suppress OPENAI001 warning for using preview OpenAI API features
+// This is required because we're using the new Responses API which is still in preview
 #pragma warning disable OPENAI001
 
 namespace IndianaChatBot.Services;
@@ -45,7 +47,7 @@ public class AgentService : IAgentService, IDisposable
             }
 
             // Use the agent to generate a response
-            ResponseResult response = _responsesClient.CreateResponse(message);
+            ResponseResult response = await _responsesClient.CreateResponseAsync(message);
             
             string agentResponse = response.GetOutputText();
 
@@ -106,7 +108,7 @@ public class AgentService : IAgentService, IDisposable
             );
 
             // Get the agent by name
-            var agentResult = _projectClient.Agents.GetAgent(_agentName);
+            var agentResult = await _projectClient.Agents.GetAgentAsync(_agentName);
             var agentRecord = agentResult.Value;
             _logger.LogInformation("Successfully retrieved agent: {AgentName} (id: {AgentId})", agentRecord.Name, agentRecord.Id);
 

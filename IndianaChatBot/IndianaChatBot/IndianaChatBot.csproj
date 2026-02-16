@@ -9,6 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Azure AI Projects SDK - Using beta versions as these are the latest available versions 
+         for the new Responses API. These packages are stable enough for production use and 
+         will be updated to stable versions when they become available. -->
     <PackageReference Include="Azure.AI.Projects" Version="1.2.0-beta.5" />
     <PackageReference Include="Azure.AI.Projects.OpenAI" Version="1.0.0-beta.5" />
     <PackageReference Include="Azure.Identity" Version="1.17.1" />
