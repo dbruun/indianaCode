@@ -28,6 +28,8 @@ A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring 
 - Microsoft Foundry account with agent deployment
 - Bing Custom Search API subscription (optional but recommended)
 
+> **💡 Quick Deploy**: Use our [Azure Bicep templates](infrastructure/README.md) to automatically deploy the Bing Custom Search resource!
+
 #### Configuration
 
 1. **Clone the repository**
@@ -36,7 +38,20 @@ A Single Page Application (SPA) built with .NET 10 Blazor WebAssembly featuring 
    cd indianaCode/IndianaChatBot
    ```
 
-2. **Configure API Keys**
+2. **Deploy Azure Resources (Optional but Recommended)**
+   
+   Deploy Bing Custom Search using our automated Bicep templates:
+   
+   ```bash
+   # Deploy infrastructure
+   az deployment sub create \
+     --location eastus \
+     --template-file infrastructure/main.bicep
+   ```
+   
+   See [infrastructure/README.md](infrastructure/README.md) for detailed deployment instructions.
+
+3. **Configure API Keys**
    
    Edit `IndianaChatBot/appsettings.json` and add your credentials:
    

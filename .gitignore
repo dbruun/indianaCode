@@ -47,3 +47,7 @@ appsettings.Development.json
 
 ## wwwroot/lib - 3rd party libraries managed by tools
 **/wwwroot/lib/
+
+## Generated ARM templates from Bicep
+infrastructure/*.json
+!infrastructure/*.parameters.json
