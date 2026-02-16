@@ -1,5 +1,6 @@
 ﻿@inherits LayoutComponentBase
 @using IndianaChatBot.Client.Components
+@using Microsoft.AspNetCore.Components.Web
 
 <div class="page">
     <div class="sidebar">
@@ -17,7 +18,7 @@
     </main>
 </div>
 
-<ChatBot @rendermode="InteractiveWebAssembly" />
+<ChatBot @rendermode="@(new InteractiveWebAssemblyRenderMode(prerender: false))" />
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
