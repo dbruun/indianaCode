@@ -84,9 +84,6 @@ RESOURCE_GROUP=$(az deployment sub show \
   --name $DEPLOYMENT_NAME \
   --query properties.outputs.resourceGroupName.value \
   -o tsv)
-  --name main \
-  --query properties.outputs.resourceGroupName.value \
-  -o tsv)
 
 # List the API keys
 az cognitiveservices account keys list \

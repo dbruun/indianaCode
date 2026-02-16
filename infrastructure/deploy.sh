@@ -4,6 +4,23 @@
 
 set -e
 
+# Determine script directory and repository root
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Check if we're in the infrastructure directory or repository root
+if [[ -f "$SCRIPT_DIR/main.bicep" ]]; then
+    # Running from infrastructure directory
+    TEMPLATE_FILE="$SCRIPT_DIR/main.bicep"
+    PARAMETERS_FILE="$SCRIPT_DIR/main.parameters.json"
+elif [[ -f "$SCRIPT_DIR/../infrastructure/main.bicep" ]]; then
+    # Running from repository root
+    TEMPLATE_FILE="$SCRIPT_DIR/../infrastructure/main.bicep"
+    PARAMETERS_FILE="$SCRIPT_DIR/../infrastructure/main.parameters.json"
+else
+    echo "❌ Cannot find Bicep templates. Please run this script from the repository root or infrastructure directory."
+    exit 1
+fi
+
 echo "================================================"
 echo "Indiana ChatBot - Infrastructure Deployment"
 echo "================================================"
@@ -52,8 +69,8 @@ DEPLOYMENT_NAME="indianachatbot-$(date +%Y%m%d-%H%M%S)"
 az deployment sub create \
   --name "$DEPLOYMENT_NAME" \
   --location eastus \
-  --template-file infrastructure/main.bicep \
-  --parameters infrastructure/main.parameters.json
+  --template-file "$TEMPLATE_FILE" \
+  --parameters "$PARAMETERS_FILE"
 
 echo ""
 echo "================================================"

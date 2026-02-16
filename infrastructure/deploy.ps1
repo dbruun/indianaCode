@@ -3,6 +3,23 @@
 
 $ErrorActionPreference = "Stop"
 
+# Determine script directory and find templates
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Check if we're in the infrastructure directory or repository root
+if (Test-Path (Join-Path $ScriptDir "main.bicep")) {
+    # Running from infrastructure directory
+    $TemplateFile = Join-Path $ScriptDir "main.bicep"
+    $ParametersFile = Join-Path $ScriptDir "main.parameters.json"
+} elseif (Test-Path (Join-Path $ScriptDir "..\infrastructure\main.bicep")) {
+    # Running from repository root
+    $TemplateFile = Join-Path $ScriptDir "..\infrastructure\main.bicep"
+    $ParametersFile = Join-Path $ScriptDir "..\infrastructure\main.parameters.json"
+} else {
+    Write-Host "❌ Cannot find Bicep templates. Please run this script from the repository root or infrastructure directory." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host "Indiana ChatBot - Infrastructure Deployment" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
@@ -52,8 +69,8 @@ $deploymentName = "indianachatbot-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 az deployment sub create `
   --name $deploymentName `
   --location eastus `
-  --template-file infrastructure/main.bicep `
-  --parameters infrastructure/main.parameters.json
+  --template-file $TemplateFile `
+  --parameters $ParametersFile
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Deployment failed" -ForegroundColor Red
